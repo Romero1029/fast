@@ -963,7 +963,8 @@ function setCtrl(running,paused){
 
 // ── Supabase Realtime ──────────────────────────────────────
 async function loadRunState(){
-  const {data}=await sb.from('fast_run_state').select('*').eq('id',1).single().catch(()=>({data:null}));
+  const {data:rows}=await sb.from('fast_run_state').select('*').eq('id',1).limit(1);
+  const data=Array.isArray(rows)?rows[0]:null;
   if(!data)return;
   S.running=data.running||false; S.paused=data.paused||false;
   lastResetAt=data.reset_at||null;
@@ -1097,8 +1098,10 @@ function updateWinBadge(){
 }
 
 async function loadCfg(){
-  const {data:cfg}=await sb.from('fast_config').select('*').eq('id',1).single().catch(()=>({data:null}));
-  if(!cfg)return;
+  const {data, error} = await sb.from('fast_config').select('*').eq('id',1).limit(1);
+  if(error){ console.error('loadCfg error:', error); alert2('al-cfg','Erro ao carregar: '+error.message); return; }
+  const cfg = Array.isArray(data) ? data[0] : null;
+  if(!cfg){ console.warn('loadCfg: nenhuma config encontrada'); return; }
   document.getElementById('cUrl').value   = cfg.base_url||'';
   document.getElementById('cKey').value   = cfg.api_key?'***':'';
   document.getElementById('cInst').value  = cfg.instance_name||'';
