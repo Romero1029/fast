@@ -588,13 +588,23 @@ td:first-child { text-align: center; font-size: 11px; color: var(--t4); font-var
 
           <!-- Mensagem -->
           <div class="card">
-            <div class="card-head" style="padding-bottom:14px"><div class="card-lbl">Mensagem</div></div>
+            <div class="card-head" style="padding-bottom:14px"><div class="card-lbl">Mensagem &amp; Horário</div></div>
             <div class="card-body" style="padding-top:0">
               <div class="fg"><label>Texto — use {nome} para personalizar</label><textarea id="msgTxt" rows="4"></textarea></div>
               <div class="frow">
                 <div><label>Delay mínimo (min)</label><input id="minD" type="number" min="0.5" step="0.5" value="1"></div>
                 <div><label>Delay máximo (min)</label><input id="maxD" type="number" min="0.5" step="0.5" value="3"></div>
               </div>
+              <div class="sep"></div>
+              <div class="fg0">
+                <label style="margin-bottom:8px;display:block">Janela de envio — fuso Brasília (0–23h)</label>
+                <div class="frow" style="margin-bottom:6px">
+                  <div><label>Início</label><input id="startH" type="number" min="0" max="23" step="1" value="8" oninput="updateWinBadge()"></div>
+                  <div><label>Fim</label><input id="endH" type="number" min="0" max="23" step="1" value="20" oninput="updateWinBadge()"></div>
+                </div>
+                <div style="font-size:10px;color:var(--t3)">Disparos só ocorrem dentro desse intervalo. Fora dele o sistema aguarda automaticamente.</div>
+              </div>
+              <div class="sep"></div>
               <button class="btn btn-g" onclick="saveSet()">Salvar configurações</button>
               <div id="al-msg" class="alrt"></div>
             </div>
@@ -614,7 +624,10 @@ td:first-child { text-align: center; font-size: 11px; color: var(--t4); font-var
           <div class="pg-title">Dashboard</div>
           <div class="pg-sub" id="sub">Carregando…</div>
         </div>
-        <div class="sbadge sb-idle" id="stBadge">Aguardando</div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="font-size:11px;color:var(--t3);background:var(--card2);border:1px solid var(--border2);border-radius:7px;padding:5px 11px;white-space:nowrap" id="winBadge">⏰ 8h – 20h</div>
+            <div class="sbadge sb-idle" id="stBadge">Aguardando</div>
+          </div>
       </div>
 
       <div class="stats-grid">
@@ -1076,15 +1089,25 @@ function copyWh(){
 }
 
 // ── Config (direto no Supabase) ────────────────────────────
+function updateWinBadge(){
+  const s=parseInt(document.getElementById('startH')?.value)||8;
+  const e=parseInt(document.getElementById('endH')?.value)||20;
+  const el=document.getElementById('winBadge');
+  if(el)el.textContent=`⏰ ${String(s).padStart(2,'0')}h – ${String(e).padStart(2,'0')}h`;
+}
+
 async function loadCfg(){
   const {data:cfg}=await sb.from('fast_config').select('*').eq('id',1).single().catch(()=>({data:null}));
   if(!cfg)return;
-  document.getElementById('cUrl').value  = cfg.base_url||'';
-  document.getElementById('cKey').value  = cfg.api_key?'***':'';
-  document.getElementById('cInst').value = cfg.instance_name||'';
-  document.getElementById('msgTxt').value= cfg.message||'Olá {nome}! Temos novidades incríveis na Fast Escova esperando por você! 💛✨';
-  document.getElementById('minD').value  = cfg.min_delay||1;
-  document.getElementById('maxD').value  = cfg.max_delay||3;
+  document.getElementById('cUrl').value   = cfg.base_url||'';
+  document.getElementById('cKey').value   = cfg.api_key?'***':'';
+  document.getElementById('cInst').value  = cfg.instance_name||'';
+  document.getElementById('msgTxt').value = cfg.message||'Olá {nome}! Temos novidades incríveis na Fast Escova esperando por você! 💛✨';
+  document.getElementById('minD').value   = cfg.min_delay||1;
+  document.getElementById('maxD').value   = cfg.max_delay||3;
+  document.getElementById('startH').value = cfg.start_hour??8;
+  document.getElementById('endH').value   = cfg.end_hour??20;
+  updateWinBadge();
 }
 
 async function saveCfg(){
@@ -1108,25 +1131,34 @@ async function setWh(){
 }
 
 async function saveSet(){
+  const sh=parseInt(document.getElementById('startH').value);
+  const eh=parseInt(document.getElementById('endH').value);
+  if(isNaN(sh)||isNaN(eh)||sh<0||sh>23||eh<0||eh>23||sh>=eh){
+    alert2('al-msg','Horário inválido — início deve ser menor que fim (0–23)');return;
+  }
   const {error}=await sb.from('fast_config').upsert({
     id:1,
     message:document.getElementById('msgTxt').value,
     min_delay:parseFloat(document.getElementById('minD').value)||1,
     max_delay:parseFloat(document.getElementById('maxD').value)||3,
+    start_hour:sh,
+    end_hour:eh,
     updated_at:new Date().toISOString()
   });
   if(error)alert2('al-msg','Erro ao salvar');
-  else alert2('al-msg','Salvo!','ok');
+  else{alert2('al-msg','Salvo!','ok');updateWinBadge();}
 }
 
 // ── Dispatch (direto no Supabase) ──────────────────────────
 async function doStart(){
-  // Save message/delay first
+  // Save message/delay/window first
   await sb.from('fast_config').upsert({
     id:1,
     message:document.getElementById('msgTxt').value,
     min_delay:parseFloat(document.getElementById('minD').value)||1,
-    max_delay:parseFloat(document.getElementById('maxD').value)||3
+    max_delay:parseFloat(document.getElementById('maxD').value)||3,
+    start_hour:parseInt(document.getElementById('startH').value)||8,
+    end_hour:parseInt(document.getElementById('endH').value)||20
   });
   // Set running = true (pg_cron will pick this up within 1 minute)
   const {error}=await sb.from('fast_run_state').upsert({
