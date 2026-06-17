@@ -745,11 +745,41 @@ td:first-child { text-align: center; font-size: 11px; color: var(--t4); font-var
 <div id="toastbox"></div>
 
 <script>
-// ── Supabase ────────────────────────────────────────────────
+// ── Supabase config ─────────────────────────────────────────
 const SUPA_URL  = 'https://gkbjemvwutaiksuueiqt.supabase.co';
 const SUPA_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdrYmplbXZ3dXRhaWtzdXVlaXF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxMDg2OTQsImV4cCI6MjA5NTY4NDY5NH0.wZS9W4aLr68KEpkxHhHTakjibzRNxGAqgckz3n9VovQ';
 const EFN       = `${SUPA_URL}/functions/v1`;
-const sb        = supabase.createClient(SUPA_URL, SUPA_ANON);
+const SB_H      = { 'Content-Type':'application/json', 'apikey':SUPA_ANON, 'Authorization':`Bearer ${SUPA_ANON}` };
+
+// ── Raw REST helpers (sem dependência do CDN) ───────────────
+async function dbGet(table, qs=''){
+  const r = await fetch(`${SUPA_URL}/rest/v1/${table}${qs?'?'+qs:''}`, {headers:SB_H});
+  if(!r.ok) throw new Error(`GET ${table} ${r.status}`);
+  return r.json();
+}
+async function dbPost(table, body){
+  const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
+    method:'POST', headers:{...SB_H,'Prefer':'resolution=merge-duplicates'}, body:JSON.stringify(body)
+  });
+  if(!r.ok) throw new Error(`POST ${table} ${r.status}: ${await r.text()}`);
+}
+async function dbPatch(table, qs, body, prefer=''){
+  const h = prefer ? {...SB_H,'Prefer':prefer} : SB_H;
+  const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${qs}`, {
+    method:'PATCH', headers:h, body:JSON.stringify(body)
+  });
+  if(!r.ok) throw new Error(`PATCH ${table} ${r.status}`);
+  return r.json();
+}
+async function dbDel(table, qs){
+  const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${qs}`, {method:'DELETE', headers:SB_H});
+  if(!r.ok) throw new Error(`DELETE ${table} ${r.status}`);
+}
+
+// ── Supabase Realtime client (CDN — somente para live updates) ─
+let sb = null;
+try { if(typeof supabase!=='undefined') sb = supabase.createClient(SUPA_URL, SUPA_ANON); }
+catch(e){ console.warn('Supabase client indisponível — Realtime desativado:', e); }
 
 // ── State ──────────────────────────────────────────────────
 const S = {
@@ -963,8 +993,9 @@ function setCtrl(running,paused){
 
 // ── Supabase Realtime ──────────────────────────────────────
 async function loadRunState(){
-  const {data:rows}=await sb.from('fast_run_state').select('*').eq('id',1).limit(1);
-  const data=Array.isArray(rows)?rows[0]:null;
+  let data=null;
+  try{ const r=await dbGet('fast_run_state','id=eq.1'); data=r?.[0]; }
+  catch(e){ console.error('loadRunState:',e); }
   if(!data)return;
   S.running=data.running||false; S.paused=data.paused||false;
   lastResetAt=data.reset_at||null;
@@ -989,6 +1020,7 @@ function handleReset(){
 }
 
 function connectRealtime(){
+  if(!sb){ document.getElementById('d-rt').className='dot d-warn'; return; }
   const dot=()=>document.getElementById('d-rt');
   sb.channel('fast-live')
     .on('postgres_changes',{event:'*',schema:'public',table:'fast_run_state'},({new:d})=>{
@@ -1098,33 +1130,32 @@ function updateWinBadge(){
 }
 
 async function loadCfg(){
-  const {data, error} = await sb.from('fast_config').select('*').eq('id',1).limit(1);
-  if(error){ console.error('loadCfg error:', error); alert2('al-cfg','Erro ao carregar: '+error.message); return; }
-  const cfg = Array.isArray(data) ? data[0] : null;
-  if(!cfg){ console.warn('loadCfg: nenhuma config encontrada'); return; }
-  document.getElementById('cUrl').value   = cfg.base_url||'';
-  document.getElementById('cKey').value   = cfg.api_key?'***':'';
-  document.getElementById('cInst').value  = cfg.instance_name||'';
-  document.getElementById('msgTxt').value = cfg.message||'Olá {nome}! Temos novidades incríveis na Fast Escova esperando por você! 💛✨';
-  document.getElementById('minD').value   = cfg.min_delay||1;
-  document.getElementById('maxD').value   = cfg.max_delay||3;
-  document.getElementById('startH').value = cfg.start_hour??8;
-  document.getElementById('endH').value   = cfg.end_hour??20;
-  updateWinBadge();
+  try {
+    const rows = await dbGet('fast_config','id=eq.1');
+    const cfg = rows?.[0];
+    if(!cfg){ console.warn('loadCfg: sem config'); return; }
+    document.getElementById('cUrl').value   = cfg.base_url||'';
+    document.getElementById('cKey').value   = cfg.api_key?'***':'';
+    document.getElementById('cInst').value  = cfg.instance_name||'';
+    document.getElementById('msgTxt').value = cfg.message||'Olá {nome}! Temos novidades incríveis na Fast Escova esperando por você! 💛✨';
+    document.getElementById('minD').value   = cfg.min_delay||1;
+    document.getElementById('maxD').value   = cfg.max_delay||3;
+    document.getElementById('startH').value = cfg.start_hour??8;
+    document.getElementById('endH').value   = cfg.end_hour??20;
+    updateWinBadge();
+  } catch(e){ console.error('loadCfg erro:',e); alert2('al-cfg','Erro ao carregar config: '+e.message); }
 }
 
 async function saveCfg(){
-  const key=document.getElementById('cKey').value;
-  const upsert={
-    id:1,
-    base_url:document.getElementById('cUrl').value.trim(),
+  const key=document.getElementById('cKey').value.trim();
+  const body={id:1, base_url:document.getElementById('cUrl').value.trim(),
     instance_name:document.getElementById('cInst').value.trim()||'fastescova',
-    updated_at:new Date().toISOString()
-  };
-  if(key&&key!=='***')upsert.api_key=key.trim();
-  const {error}=await sb.from('fast_config').upsert(upsert);
-  if(error)alert2('al-cfg',error.message);
-  else{alert2('al-cfg','Salvo!','ok');checkWa();}
+    updated_at:new Date().toISOString()};
+  if(key&&key!=='***') body.api_key=key;
+  try{
+    await dbPost('fast_config',body);
+    alert2('al-cfg','Salvo!','ok'); checkWa();
+  }catch(e){alert2('al-cfg','Erro ao salvar: '+e.message);}
 }
 
 async function setWh(){
@@ -1139,74 +1170,64 @@ async function saveSet(){
   if(isNaN(sh)||isNaN(eh)||sh<0||sh>23||eh<0||eh>23||sh>=eh){
     alert2('al-msg','Horário inválido — início deve ser menor que fim (0–23)');return;
   }
-  const {error}=await sb.from('fast_config').upsert({
-    id:1,
-    message:document.getElementById('msgTxt').value,
-    min_delay:parseFloat(document.getElementById('minD').value)||1,
-    max_delay:parseFloat(document.getElementById('maxD').value)||3,
-    start_hour:sh,
-    end_hour:eh,
-    updated_at:new Date().toISOString()
-  });
-  if(error)alert2('al-msg','Erro ao salvar');
-  else{alert2('al-msg','Salvo!','ok');updateWinBadge();}
+  try{
+    await dbPost('fast_config',{id:1,
+      message:document.getElementById('msgTxt').value,
+      min_delay:parseFloat(document.getElementById('minD').value)||1,
+      max_delay:parseFloat(document.getElementById('maxD').value)||3,
+      start_hour:sh, end_hour:eh, updated_at:new Date().toISOString()});
+    alert2('al-msg','Salvo!','ok'); updateWinBadge();
+  }catch(e){alert2('al-msg','Erro ao salvar: '+e.message);}
 }
 
 // ── Dispatch (direto no Supabase) ──────────────────────────
 async function doStart(){
-  // Save message/delay/window first
-  await sb.from('fast_config').upsert({
-    id:1,
-    message:document.getElementById('msgTxt').value,
-    min_delay:parseFloat(document.getElementById('minD').value)||1,
-    max_delay:parseFloat(document.getElementById('maxD').value)||3,
-    start_hour:parseInt(document.getElementById('startH').value)||8,
-    end_hour:parseInt(document.getElementById('endH').value)||20
-  });
-  // Set running = true (pg_cron will pick this up within 1 minute)
-  const {error}=await sb.from('fast_run_state').upsert({
-    id:1, running:true, paused:false,
-    next_message_at:null, updated_at:new Date().toISOString()
-  });
-  if(!error){S.running=true;S.paused=false;setCtrl(true,false);toast('▶ Disparo iniciado — primeira mensagem em até 1 min','tok');}
-  else toast(error.message,'terr');
+  try{
+    await dbPost('fast_config',{id:1,
+      message:document.getElementById('msgTxt').value,
+      min_delay:parseFloat(document.getElementById('minD').value)||1,
+      max_delay:parseFloat(document.getElementById('maxD').value)||3,
+      start_hour:parseInt(document.getElementById('startH').value)||8,
+      end_hour:parseInt(document.getElementById('endH').value)||20});
+    await dbPost('fast_run_state',{id:1,running:true,paused:false,
+      next_message_at:null,updated_at:new Date().toISOString()});
+    S.running=true; S.paused=false; setCtrl(true,false);
+    toast('▶ Disparo iniciado — primeira mensagem em até 1 min','tok');
+  }catch(e){toast('Erro ao iniciar: '+e.message,'terr');}
 }
 
 async function doPause(){
-  const isPaused=S.paused;
-  const {error}=await sb.from('fast_run_state').update({
-    paused:!isPaused, next_message_at:null, updated_at:new Date().toISOString()
-  }).eq('id',1);
-  if(!error)clearInterval(cdTimer);
-  else toast(error.message,'terr');
+  try{
+    await dbPatch('fast_run_state','id=eq.1',
+      {paused:!S.paused,next_message_at:null,updated_at:new Date().toISOString()});
+    clearInterval(cdTimer);
+  }catch(e){toast('Erro: '+e.message,'terr');}
 }
 
 async function doReset(){
   if(!confirm('Reiniciar todos os envios?\nStatus e classificações serão apagados.'))return;
   clearInterval(cdTimer);
-  await sb.from('fast_dispatch').delete().neq('idx',-1);
-  const {error}=await sb.from('fast_run_state').upsert({
-    id:1, running:false, paused:false,
-    current_index:0, sent:0, errors:0, skipped:0,
-    hot:0, warm:0, cold:0,
-    next_message_at:null, reset_at:new Date().toISOString(),
-    updated_at:new Date().toISOString()
-  });
-  if(error)toast(error.message,'terr');
+  try{
+    await dbDel('fast_dispatch','idx=neq.-1');
+    await dbPost('fast_run_state',{id:1,running:false,paused:false,
+      current_index:0,sent:0,errors:0,skipped:0,hot:0,warm:0,cold:0,
+      next_message_at:null,reset_at:new Date().toISOString(),
+      updated_at:new Date().toISOString()});
+  }catch(e){toast('Erro ao reiniciar: '+e.message,'terr');}
 }
 
 // ── Boot ───────────────────────────────────────────────────
 (async()=>{
-  // Load contacts + dispatch state
-  const [{data:contacts},{data:dispatches}]=await Promise.all([
-    sb.from('fast_contacts').select('idx,name,phone').order('idx'),
-    sb.from('fast_dispatch').select('idx,status,sent_at,classification,read_time,reply')
+  // Load contacts + dispatch state via raw fetch (sem depender do CDN)
+  const [contacts, dispatches]=await Promise.all([
+    dbGet('fast_contacts','select=idx,name,phone&order=idx').catch(()=>[]),
+    dbGet('fast_dispatch','select=idx,status,sent_at,classification,read_time,reply').catch(()=>[])
   ]);
 
   const dMap={};
-  (dispatches||[]).forEach(d=>dMap[d.idx]=d);
+  (Array.isArray(dispatches)?dispatches:[]).forEach(d=>dMap[d.idx]=d);
 
-  const list=(contacts||[]).map(c=>({
+  const list=(Array.isArray(contacts)?contacts:[]).map(c=>({
     ...c,
     status:     dMap[c.idx]?.status         ||'pending',
     timestamp:  dMap[c.idx]?.sent_at        ||'',
