@@ -6,6 +6,7 @@
 <title>fast escova — disparos</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -467,7 +468,7 @@ td:first-child { text-align: center; font-size: 11px; color: var(--t4); font-var
     </div>
     <div class="hdr-st">
       <div class="dot d-err" id="d-ws"></div>
-      <span>Servidor</span>
+      <span>Realtime</span>
     </div>
   </div>
 </header>
@@ -716,6 +717,11 @@ td:first-child { text-align: center; font-size: 11px; color: var(--t4); font-var
 <div id="toastbox"></div>
 
 <script>
+// ── Supabase ────────────────────────────────────────────────
+const SUPA_URL  = 'https://gkbjemvwutaiksuueiqt.supabase.co';
+const SUPA_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdrYmplbXZ3dXRhaWtzdXVlaXF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxMDg2OTQsImV4cCI6MjA5NTY4NDY5NH0.wZS9W4aLr68KEpkxHhHTakjibzRNxGAqgckz3n9VovQ';
+const sb = supabase.createClient(SUPA_URL, SUPA_ANON);
+
 // ── State ──────────────────────────────────────────────────
 const S = {
   contacts:[], statuses:[], timestamps:[], errorMsgs:[],
@@ -723,7 +729,7 @@ const S = {
   sent:0, errors:0, skipped:0, hot:0, warm:0, cold:0,
   total:0, running:false, paused:false, nextIn:0, filter:'all'
 };
-let ws, wsRetry=0, waPoller=null, curPage='analise';
+let waPoller=null, curPage='analise', countdownTimer=null, lastResetAt=null;
 
 // ── Logo: remove white bg via canvas ──────────────────────
 function cleanLogo(img) {
@@ -921,85 +927,98 @@ function setCtrl(running, paused) {
   else{bs.textContent='▶ Iniciar';bs.disabled=false;bp.disabled=true;}
 }
 
-// ── WebSocket ──────────────────────────────────────────────
-function connectWs() {
-  const proto=location.protocol==='https:'?'wss':'ws';
-  ws=new WebSocket(`${proto}://${location.host}`);
-  ws.onopen=()=>{wsRetry=0;document.getElementById('d-ws').className='dot d-ok';};
-  ws.onclose=()=>{document.getElementById('d-ws').className='dot d-err';setTimeout(connectWs,Math.min(10000,2000*++wsRetry));};
-  ws.onmessage=e=>{try{handleWs(JSON.parse(e.data));}catch{}};
+// ── Supabase Realtime ──────────────────────────────────────
+function startCountdown(nextAt) {
+  clearInterval(countdownTimer);
+  if (!nextAt) { setCountdown(0); return; }
+  countdownTimer = setInterval(() => {
+    const sec = Math.max(0, Math.round((new Date(nextAt) - Date.now()) / 1000));
+    setCountdown(sec);
+    if (sec <= 0) clearInterval(countdownTimer);
+  }, 1000);
 }
 
 function mergeS() {
-  S.contacts.forEach((c,i)=>{
-    c.status         = S.statuses[i]||'pending';
-    c.timestamp      = S.timestamps[i]||'';
-    c.classification = S.classifications[i]||'none';
-    c.readTime       = S.readTimes[i]||'';
-    c.reply          = S.replies[i]||'';
+  S.contacts.forEach((c,i) => {
+    c.status         = S.statuses[i]        || 'pending';
+    c.timestamp      = S.timestamps[i]      || '';
+    c.classification = S.classifications[i] || 'none';
+    c.readTime       = S.readTimes[i]       || '';
+    c.reply          = S.replies[i]         || '';
   });
 }
 
-function handleWs(d) {
-  switch(d.type){
-    case 'init':
-      Object.assign(S,{
-        total:d.total, running:d.running, paused:d.paused,
-        statuses:d.statuses||[], timestamps:d.timestamps||[], errorMsgs:d.errorMsgs||[],
-        classifications:d.classifications||[], readTimes:d.readTimes||[],
-        replyTimes:d.replyTimes||[], replies:d.replies||[]
-      });
-      document.getElementById('sv-tot').textContent=d.total;
-      document.getElementById('sub').textContent=`${d.total} contatos carregados`;
-      if(S.contacts.length){mergeS();buildTable(S.contacts);}
-      setStats(d.sent,d.errors,d.skipped,d.hot||0,d.warm||0,d.cold||0);
-      setCountdown(d.nextIn||0); setCtrl(d.running,d.paused);
-      if(d.message) document.getElementById('msgTxt').value=d.message;
-      if(d.minDelay!=null) document.getElementById('minD').value=d.minDelay;
-      if(d.maxDelay!=null) document.getElementById('maxD').value=d.maxDelay;
-      if(d.running&&!d.paused)setStBadge('running'); else if(d.paused)setStBadge('paused');
-      break;
+function handleReset() {
+  clearInterval(countdownTimer);
+  S.statuses        = new Array(S.total).fill('pending');
+  S.classifications = new Array(S.total).fill('none');
+  S.timestamps      = new Array(S.total).fill('');
+  S.errorMsgs       = new Array(S.total).fill('');
+  S.readTimes       = new Array(S.total).fill('');
+  S.replyTimes      = new Array(S.total).fill('');
+  S.replies         = new Array(S.total).fill('');
+  S.running = false; S.paused = false;
+  mergeS(); buildTable(S.contacts);
+  setStats(0,0,0,0,0,0); setCountdown(0); setCtrl(false,false); setStBadge('idle');
+  toast('↺ Disparo reiniciado');
+}
 
-    case 'status':
-      if(S.statuses)S.statuses[d.index]=d.status;
-      if(d.timestamp&&S.timestamps)S.timestamps[d.index]=d.timestamp;
-      if(d.classification&&S.classifications)S.classifications[d.index]=d.classification;
-      upRow(d.index,d.status,d.timestamp,d.classification);
-      break;
+async function loadRunState() {
+  const { data } = await sb.from('fast_run_state').select('*').eq('id',1).single().catch(()=>({data:null}));
+  if (!data) return;
+  S.running = data.running || false;
+  S.paused  = data.paused  || false;
+  lastResetAt = data.reset_at || null;
+  setStats(data.sent||0, data.errors||0, data.skipped||0, data.hot||0, data.warm||0, data.cold||0);
+  setCtrl(data.running, data.paused);
+  if (!data.running && !data.paused && (data.sent||0) > 0) setStBadge('done');
+  startCountdown(data.next_message_at || null);
+}
 
-    case 'classification':
-      if(S.classifications)S.classifications[d.index]=d.classification;
-      if(d.readTime&&S.readTimes)S.readTimes[d.index]=d.readTime;
-      if(d.reply!=null&&S.replies)S.replies[d.index]=d.reply;
-      upCls(d.index,d.classification,d.readTime,d.reply);
-      const nc=d.cold??S.cold, nw=d.warm??S.warm, nh=d.hot??S.hot;
-      Object.assign(S,{hot:nh,warm:nw,cold:nc});
-      setTemp(nc, nw, nh, S.sent);
-      break;
+function connectRealtime() {
+  const dot = () => document.getElementById('d-ws');
 
-    case 'stats': setStats(d.sent,d.errors,d.skipped,d.hot||0,d.warm||0,d.cold||0); break;
-    case 'countdown': setCountdown(d.seconds); break;
+  sb.channel('fast-live')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'fast_run_state' }, ({new: d}) => {
+      if (!d) return;
 
-    case 'complete':
-      setCtrl(false,false); setStBadge('done'); setCountdown(0);
-      toast(`✓ Concluído — ${d.sent} enviados, ${d.errors} erros, ${d.skipped} inválidos`,'tok');
-      break;
+      // Reset detection
+      if (d.reset_at && d.reset_at !== lastResetAt) {
+        lastResetAt = d.reset_at;
+        handleReset();
+        return;
+      }
 
-    case 'paused': S.running=true;S.paused=true;setCtrl(true,true);setCountdown(0); break;
+      S.running = d.running || false;
+      S.paused  = d.paused  || false;
+      setStats(d.sent||0, d.errors||0, d.skipped||0, d.hot||0, d.warm||0, d.cold||0);
+      setCtrl(d.running, d.paused);
 
-    case 'reset':
-      S.statuses=new Array(S.total).fill('pending');
-      S.classifications=new Array(S.total).fill('none');
-      S.timestamps=new Array(S.total).fill('');
-      S.errorMsgs=new Array(S.total).fill('');
-      S.readTimes=new Array(S.total).fill('');
-      S.replyTimes=new Array(S.total).fill('');
-      S.replies=new Array(S.total).fill('');
-      S.running=false;S.paused=false;
-      mergeS();buildTable(S.contacts);
-      setStats(0,0,0,0,0,0);setCountdown(0);setCtrl(false,false);setStBadge('idle');
-      break;
-  }
+      const done = (d.sent||0) + (d.errors||0) + (d.skipped||0);
+      if (!d.running && !d.paused && done > 0 && (d.current_index||0) >= S.total) {
+        setStBadge('done');
+        toast(`✓ Concluído — ${d.sent} enviados, ${d.errors} erros, ${d.skipped} inválidos`, 'tok');
+      }
+
+      startCountdown(d.next_message_at || null);
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'fast_dispatch' }, ({new: d}) => {
+      if (!d || d.idx == null) return;
+      const i = d.idx;
+      S.statuses[i]        = d.status        || 'pending';
+      S.timestamps[i]      = d.sent_at       || '';
+      S.classifications[i] = d.classification || 'none';
+      S.readTimes[i]       = d.read_time     || '';
+      S.replies[i]         = d.reply         || '';
+      upRow(i, d.status || 'pending', d.sent_at || '', d.classification || 'none');
+      if (d.classification && d.classification !== 'none') {
+        upCls(i, d.classification, d.read_time || '', d.reply || '');
+      }
+    })
+    .subscribe(status => {
+      const ok = status === 'SUBSCRIBED';
+      dot().className = `dot ${ok ? 'd-ok' : status === 'CHANNEL_ERROR' ? 'd-err' : 'd-warn'}`;
+    });
 }
 
 // ── WhatsApp ───────────────────────────────────────────────
@@ -1114,14 +1133,25 @@ async function saveSet() {
 
 // ── Boot ───────────────────────────────────────────────────
 (async()=>{
-  const contacts=await fetch('/api/contacts').then(r=>r.json()).catch(()=>[]);
-  S.contacts=contacts; S.total=contacts.length;
-  document.getElementById('sv-tot').textContent=contacts.length;
-  document.getElementById('sub').textContent=`${contacts.length} contatos carregados`;
+  const contacts = await fetch('/api/contacts').then(r=>r.json()).catch(()=>[]);
+  S.contacts = contacts; S.total = contacts.length;
+  document.getElementById('sv-tot').textContent = contacts.length;
+  document.getElementById('sub').textContent = `${contacts.length} contatos carregados`;
+
+  // Seed local arrays from server response
+  contacts.forEach((c,i)=>{
+    S.statuses[i]        = c.status         || 'pending';
+    S.timestamps[i]      = c.timestamp      || '';
+    S.classifications[i] = c.classification || 'none';
+    S.readTimes[i]       = c.readTime       || '';
+    S.replies[i]         = c.reply          || '';
+  });
+
   buildTable(contacts);
   await loadCfg();
+  await loadRunState();
   checkWa();
-  connectWs();
+  connectRealtime();
 })();
 </script>
 </body>
