@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fast Escova · Painel de Disparos</title>
+<style>
+:root {
+  --bg: #111;
+  --card: #1a1a1a;
+  --border: #2a2a2a;
+  --yellow: #d4a83a;
+  --yellow2: #e8c060;
+  --white: #f0f0f0;
+  --gray: #888;
+  --success: #22c55e;
+  --error: #ef4444;
+  --blue: #3b82f6;
+  --sending-color: #60a5fa;
+  --skipped: #6b7280;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: var(--bg); color: var(--white); font-family: 'Segoe UI', Arial, sans-serif; min-height: 100vh; }
+
+/* NAV */
+nav {
+  background: #0a0a0a;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center;
+  padding: 0 32px; height: 64px; gap: 32px;
+  position: sticky; top: 0; z-index: 100;
+}
+nav img { height: 44px; }
+.nav-links { display: flex; gap: 4px; margin-left: auto; }
+.nav-link {
+  padding: 8px 20px; border-radius: 8px;
+  text-decoration: none; font-size: 13px; font-weight: 600;
+  color: var(--gray); transition: all .2s; letter-spacing: .5px;
+}
+.nav-link:hover { color: var(--white); background: var(--border); }
+.nav-link.active { color: var(--yellow); background: rgba(212,168,58,.12); }
+.conn-badge {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--gray);
+}
+.conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gray); }
+.conn-dot.on { background: var(--success); box-shadow: 0 0 6px var(--success); }
+
+/* MAIN */
+main { max-width: 1280px; margin: 0 auto; padding: 28px 24px 60px; }
+
+/* STATS ROW */
+.stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 20px; }
+.stat {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 18px 20px; text-align: center;
+}
+.stat .val { font-size: 34px; font-weight: 800; line-height: 1; margin-bottom: 5px; }
+.stat .lbl { font-size: 11px; color: var(--gray); text-transform: uppercase; letter-spacing: 1px; }
+.stat.total .val { color: var(--yellow); }
+.stat.sent .val { color: var(--success); }
+.stat.errs .val { color: var(--error); }
+.stat.skip .val { color: var(--skipped); }
+.stat.next .val { color: var(--blue); font-size: 28px; }
+
+/* PROGRESS */
+.prog-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 20px 24px; margin-bottom: 16px;
+}
+.prog-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.prog-title { font-size: 13px; color: var(--gray); font-weight: 600; letter-spacing: .5px; }
+.prog-pct { font-size: 22px; font-weight: 800; color: var(--yellow); }
+.prog-bar { background: #222; border-radius: 999px; height: 10px; overflow: hidden; }
+.prog-fill {
+  height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--yellow), var(--yellow2));
+  transition: width .4s ease;
+  width: 0%;
+}
+.prog-sub { margin-top: 8px; font-size: 12px; color: var(--gray); }
+
+/* MESSAGE BOX */
+.msg-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 20px 24px; margin-bottom: 16px;
+}
+.msg-label { font-size: 12px; color: var(--gray); margin-bottom: 8px; letter-spacing: .5px; font-weight: 600; }
+textarea {
+  width: 100%; background: #111; border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 14px; color: var(--white);
+  font-size: 14px; resize: vertical; min-height: 80px; outline: none;
+  font-family: inherit; transition: border-color .2s; line-height: 1.5;
+}
+textarea:focus { border-color: var(--yellow); }
+.msg-hint { font-size: 11px; color: var(--gray); margin-top: 6px; }
+.delay-row { display: flex; gap: 16px; align-items: center; margin-top: 14px; }
+.delay-row label { font-size: 12px; color: var(--gray); margin-bottom: 4px; }
+.delay-row input[type=number] {
+  width: 80px; background: #111; border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 12px; color: var(--white);
+  font-size: 14px; outline: none; text-align: center;
+}
+.delay-row input:focus { border-color: var(--yellow); }
+
+/* CONTROLS */
+.controls { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 11px 26px; border-radius: 9px; border: none;
+  cursor: pointer; font-size: 14px; font-weight: 700;
+  transition: all .2s; white-space: nowrap; letter-spacing: .3px;
+}
+.btn-start { background: var(--yellow); color: #111; }
+.btn-start:hover { background: var(--yellow2); }
+.btn-pause { background: #2563eb; color: #fff; }
+.btn-pause:hover { background: #1d4ed8; }
+.btn-reset { background: transparent; color: var(--white); border: 1px solid var(--border); }
+.btn-reset:hover { background: var(--border); }
+.btn:disabled { opacity: .35; cursor: not-allowed; pointer-events: none; }
+.running-badge {
+  display: none; align-items: center; gap: 8px;
+  padding: 8px 16px; border-radius: 8px;
+  background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.3);
+  color: var(--success); font-size: 13px; font-weight: 600;
+}
+.pulse-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--success);
+  animation: pd 1s infinite;
+}
+@keyframes pd { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.5);opacity:.5} }
+
+/* TABLE */
+.table-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 14px; overflow: hidden;
+}
+.table-topbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 20px; border-bottom: 1px solid var(--border);
+  background: #161616;
+}
+.table-topbar h3 { font-size: 14px; font-weight: 700; }
+.tcount { font-size: 12px; color: var(--gray); }
+.search {
+  margin-left: auto; background: #111; border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 14px; color: var(--white);
+  font-size: 13px; outline: none; width: 220px; transition: border-color .2s;
+}
+.search:focus { border-color: var(--yellow); }
+.filter-btns { display: flex; gap: 6px; }
+.fbtn {
+  padding: 5px 12px; border-radius: 6px; font-size: 11px; font-weight: 600;
+  cursor: pointer; border: 1px solid var(--border); background: transparent;
+  color: var(--gray); transition: all .2s; letter-spacing: .3px;
+}
+.fbtn:hover, .fbtn.active { background: var(--border); color: var(--white); }
+.fbtn.f-sent.active { border-color: var(--success); color: var(--success); background: rgba(34,197,94,.1); }
+.fbtn.f-error.active { border-color: var(--error); color: var(--error); background: rgba(239,68,68,.1); }
+.fbtn.f-pending.active { border-color: var(--gray); color: var(--gray); }
+
+.table-scroll { overflow-y: auto; max-height: 520px; }
+table { width: 100%; border-collapse: collapse; }
+thead { position: sticky; top: 0; z-index: 10; }
+thead th {
+  padding: 10px 20px; text-align: left;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--gray); background: #141414; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+tbody tr { border-bottom: 1px solid #1e1e1e; transition: background .15s; }
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: rgba(255,255,255,.02); }
+tbody tr.row-sending { background: rgba(96,165,250,.06); }
+tbody tr.row-sent { }
+tbody tr.row-error { }
+td { padding: 11px 20px; font-size: 13px; vertical-align: middle; }
+.td-num { color: #444; font-size: 11px; width: 44px; }
+.td-name { font-weight: 500; max-width: 220px; }
+.td-phone { color: var(--gray); font-family: monospace; font-size: 12px; }
+.td-time { color: #555; font-size: 11px; font-family: monospace; width: 80px; }
+.td-err { color: var(--gray); font-size: 11px; max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.td-status { text-align: right; width: 130px; }
+
+/* BADGES */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700;
+}
+.b-pending { background: #1f1f1f; color: #555; }
+.b-sending { background: rgba(96,165,250,.15); color: var(--sending-color); }
+.b-sent { background: rgba(34,197,94,.1); color: var(--success); }
+.b-error { background: rgba(239,68,68,.1); color: var(--error); }
+.b-skipped { background: #1f1f1f; color: var(--skipped); }
+.b-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.b-dot.blink { animation: pd 1s infinite; }
+
+/* SCROLLBAR */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: #111; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+/* SPIN */
+.spin { animation: sp .7s linear infinite; display: inline-block; }
+@keyframes sp { from{transform:rotate(0)} to{transform:rotate(360deg)} }
+</style>
+</head>
+<body>
+
+<nav>
+  <img src="/assets/logo_000058725.jpg" alt="Fast Escova">
+  <div class="conn-badge">
+    <div class="conn-dot" id="connDot"></div>
+    <span id="connText">Verificando...</span>
+  </div>
+  <div class="nav-links">
+    <a href="/connect.html" class="nav-link">📱 Conectar</a>
+    <a href="/dispatch.html" class="nav-link active">🚀 Disparar</a>
+  </div>
+</nav>
+
+<main>
+
+  <!-- STATS -->
+  <div class="stats">
+    <div class="stat total"><div class="val" id="sTotal">—</div><div class="lbl">Total</div></div>
+    <div class="stat sent"><div class="val" id="sSent">0</div><div class="lbl">Enviados</div></div>
+    <div class="stat errs"><div class="val" id="sErrors">0</div><div class="lbl">Erros</div></div>
+    <div class="stat skip"><div class="val" id="sSkipped">0</div><div class="lbl">Inválidos</div></div>
+    <div class="stat next"><div class="val" id="sNext">—</div><div class="lbl">Próxima em</div></div>
+  </div>
+
+  <!-- PROGRESS -->
+  <div class="prog-card">
+    <div class="prog-header">
+      <span class="prog-title">PROGRESSO DO DISPARO</span>
+      <span class="prog-pct" id="progPct">0%</span>
+    </div>
+    <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
+    <div class="prog-sub" id="progSub">Aguardando início...</div>
+  </div>
+
+  <!-- MESSAGE -->
+  <div class="msg-card">
+    <div class="msg-label">MENSAGEM DO DISPARO</div>
+    <textarea id="msgText" rows="3" placeholder="Mensagem para enviar..."></textarea>
+    <div class="msg-hint">Use <strong style="color:var(--yellow)">{nome}</strong> para inserir o primeiro nome da cliente automaticamente.</div>
+    <div class="delay-row">
+      <div>
+        <label>DELAY MÍNIMO (s)</label>
+        <input type="number" id="minDelay" value="10" min="3" max="300">
+      </div>
+      <div>
+        <label>DELAY MÁXIMO (s)</label>
+        <input type="number" id="maxDelay" value="20" min="3" max="300">
+      </div>
+      <div style="margin-left:4px;margin-top:18px">
+        <button class="btn btn-reset" style="padding:9px 18px;font-size:13px" onclick="saveSettings()">💾 Salvar</button>
+      </div>
+      <div style="margin-left:auto;margin-top:18px;font-size:12px;color:var(--gray);text-align:right;line-height:1.6">
+        Intervalo aleatório entre mensagens<br>para evitar bloqueio do WhatsApp.
+      </div>
+    </div>
+  </div>
+
+  <!-- CONTROLS -->
+  <div class="controls">
+    <button class="btn btn-start" id="btnStart" onclick="startDispatch()">▶ Iniciar Disparo</button>
+    <button class="btn btn-pause" id="btnPause" onclick="pauseDispatch()" disabled>⏸ Pausar</button>
+    <button class="btn btn-reset" id="btnReset" onclick="resetDispatch()" disabled>↺ Reiniciar</button>
+    <div class="running-badge" id="runBadge">
+      <div class="pulse-dot"></div>
+      Disparo em andamento
+    </div>
+  </div>
+
+  <!-- TABLE -->
+  <div class="table-card">
+    <div class="table-topbar">
+      <h3>Lista de Contatos</h3>
+      <span class="tcount" id="tcount"></span>
+      <div class="filter-btns">
+        <button class="fbtn" onclick="setFilter('all',this)">Todos</button>
+        <button class="fbtn f-sent" onclick="setFilter('sent',this)">✓ Enviados</button>
+        <button class="fbtn f-error" onclick="setFilter('error',this)">✗ Erros</button>
+        <button class="fbtn f-pending" onclick="setFilter('pending',this)">⏳ Pendentes</button>
+      </div>
+      <input class="search" type="text" placeholder="🔍 Buscar nome ou número..." oninput="filterTable()">
+    </div>
+    <div class="table-scroll" id="tableScroll">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Nome</th>
+            <th>Telefone</th>
+            <th>Horário</th>
+            <th>Observação</th>
+            <th style="text-align:right">Status</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let contacts = [];
+let statuses = [];
+let timestamps = [];
+let errorMsgs = [];
+let total = 0;
+let sent = 0, errors = 0, skipped = 0;
+let currentIndex = 0;
+let running = false, paused = false;
+let filterMode = 'all';
+let searchVal = '';
+let ws = null;
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}`);
+
+  ws.onmessage = e => {
+    const d = JSON.parse(e.data);
+    handleWS(d);
+  };
+
+  ws.onclose = () => {
+    setTimeout(connectWS, 2000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+function handleWS(d) {
+  switch (d.type) {
+    case 'init':
+      total = d.total;
+      statuses = d.statuses;
+      timestamps = d.timestamps;
+      errorMsgs = d.errorMsgs;
+      sent = d.sent; errors = d.errors; skipped = d.skipped;
+      currentIndex = d.currentIndex;
+      running = d.running; paused = d.paused;
+      document.getElementById('msgText').value = d.message || '';
+      document.getElementById('minDelay').value = d.minDelay || 10;
+      document.getElementById('maxDelay').value = d.maxDelay || 20;
+      renderAll();
+      updateStats();
+      updateControls();
+      if (d.nextIn > 0) setCountdown(d.nextIn);
+      break;
+
+    case 'status':
+      statuses[d.index] = d.status;
+      timestamps[d.index] = d.timestamp || '';
+      if (d.errorMsg) errorMsgs[d.index] = d.errorMsg;
+      currentIndex = d.index + 1;
+      updateRow(d.index);
+      if (d.status === 'sending') scrollToRow(d.index);
+      break;
+
+    case 'stats':
+      sent = d.sent; errors = d.errors; skipped = d.skipped;
+      updateStats();
+      break;
+
+    case 'countdown':
+      setCountdown(d.seconds);
+      break;
+
+    case 'paused':
+      running = true; paused = true;
+      updateControls();
+      setCountdown(0);
+      break;
+
+    case 'complete':
+      running = false; paused = false;
+      sent = d.sent; errors = d.errors; skipped = d.skipped;
+      updateStats();
+      updateControls();
+      setCountdown(0);
+      document.getElementById('progSub').textContent = `✅ Disparo concluído! ${sent} enviados, ${errors} erros, ${skipped} inválidos.`;
+      break;
+
+    case 'reset':
+      total = d.total || total;
+      statuses = new Array(total).fill('pending');
+      timestamps = new Array(total).fill('');
+      errorMsgs = new Array(total).fill('');
+      sent = 0; errors = 0; skipped = 0; currentIndex = 0;
+      running = false; paused = false;
+      renderAll(); updateStats(); updateControls(); setCountdown(0);
+      break;
+  }
+}
+
+// ── Render all rows ───────────────────────────────────────────────────────────
+function renderAll() {
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = contacts.map((c, i) => rowHTML(c, i)).join('');
+  document.getElementById('sTotal').textContent = total;
+  applyFilter();
+}
+
+function rowHTML(c, i) {
+  const st = statuses[i] || 'pending';
+  const ts = timestamps[i] || '';
+  const em = errorMsgs[i] || '';
+  return `<tr id="row-${i}" class="row-${st}" data-name="${c.name.toLowerCase()}" data-phone="${c.phone}" data-status="${st}">
+    <td class="td-num">${i + 1}</td>
+    <td class="td-name">${esc(c.name)}</td>
+    <td class="td-phone">${esc(c.phone)}</td>
+    <td class="td-time">${ts}</td>
+    <td class="td-err" title="${esc(em)}">${esc(em)}</td>
+    <td class="td-status">${badgeHTML(st)}</td>
+  </tr>`;
+}
+
+function badgeHTML(st) {
+  const map = {
+    pending:  `<span class="badge b-pending"><span class="b-dot"></span>Pendente</span>`,
+    sending:  `<span class="badge b-sending"><span class="b-dot blink"></span>Enviando…</span>`,
+    sent:     `<span class="badge b-sent"><span class="b-dot"></span>Enviado ✓</span>`,
+    error:    `<span class="badge b-error"><span class="b-dot"></span>Erro ✗</span>`,
+    skipped:  `<span class="badge b-skipped"><span class="b-dot"></span>Inválido</span>`
+  };
+  return map[st] || map.pending;
+}
+
+function updateRow(i) {
+  const row = document.getElementById(`row-${i}`);
+  if (!row) return;
+  const st = statuses[i];
+  row.className = `row-${st}`;
+  row.dataset.status = st;
+  row.children[3].textContent = timestamps[i] || '';
+  row.children[4].textContent = errorMsgs[i] || '';
+  row.children[4].title = errorMsgs[i] || '';
+  row.children[5].innerHTML = badgeHTML(st);
+  applyFilter();
+}
+
+function scrollToRow(i) {
+  const row = document.getElementById(`row-${i}`);
+  if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// ── Stats & Progress ──────────────────────────────────────────────────────────
+function updateStats() {
+  const processed = sent + errors + skipped;
+  const pct = total > 0 ? Math.round(processed / total * 100) : 0;
+  document.getElementById('sSent').textContent = sent;
+  document.getElementById('sErrors').textContent = errors;
+  document.getElementById('sSkipped').textContent = skipped;
+  document.getElementById('sTotal').textContent = total;
+  document.getElementById('progFill').style.width = pct + '%';
+  document.getElementById('progPct').textContent = pct + '%';
+  const remaining = total - processed;
+  document.getElementById('progSub').textContent =
+    running && !paused
+      ? `Processando ${currentIndex + 1} de ${total} — ${remaining} restantes`
+      : paused
+        ? `⏸ Pausado em ${currentIndex} de ${total} — ${remaining} restantes`
+        : processed > 0 ? `${processed} de ${total} processados` : 'Aguardando início...';
+}
+
+function setCountdown(s) {
+  document.getElementById('sNext').textContent = s > 0 ? s + 's' : (running && !paused ? '…' : '—');
+}
+
+// ── Controls ──────────────────────────────────────────────────────────────────
+function updateControls() {
+  const btnStart = document.getElementById('btnStart');
+  const btnPause = document.getElementById('btnPause');
+  const btnReset = document.getElementById('btnReset');
+  const badge = document.getElementById('runBadge');
+
+  if (running && !paused) {
+    btnStart.disabled = true;
+    btnPause.disabled = false;
+    btnReset.disabled = true;
+    badge.style.display = 'flex';
+    btnStart.textContent = '▶ Iniciado';
+  } else if (paused) {
+    btnStart.disabled = false;
+    btnStart.textContent = '▶ Retomar';
+    btnPause.disabled = true;
+    btnReset.disabled = false;
+    badge.style.display = 'none';
+  } else {
+    btnStart.disabled = false;
+    btnStart.textContent = '▶ Iniciar Disparo';
+    btnPause.disabled = true;
+    btnReset.disabled = sent + errors + skipped === 0;
+    badge.style.display = 'none';
+  }
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+async function startDispatch() {
+  const msg = document.getElementById('msgText').value.trim();
+  if (!msg) { alert('Digite a mensagem antes de iniciar.'); return; }
+  const r = await fetch('/api/dispatch/start', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      message: msg,
+      minDelay: document.getElementById('minDelay').value,
+      maxDelay: document.getElementById('maxDelay').value
+    })
+  }).then(r=>r.json());
+  if (!r.ok) alert('Erro: ' + r.error);
+  else { running = true; paused = false; updateControls(); }
+}
+
+async function pauseDispatch() {
+  await fetch('/api/dispatch/pause', { method: 'POST' });
+}
+
+async function resetDispatch() {
+  if (!confirm('Reiniciar o disparo? Todos os dados serão zerados.')) return;
+  await fetch('/api/dispatch/reset', { method: 'POST' });
+}
+
+async function saveSettings() {
+  await fetch('/api/dispatch/settings', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      message: document.getElementById('msgText').value,
+      minDelay: document.getElementById('minDelay').value,
+      maxDelay: document.getElementById('maxDelay').value
+    })
+  });
+}
+
+// ── Filter & Search ───────────────────────────────────────────────────────────
+function setFilter(mode, btn) {
+  filterMode = mode;
+  document.querySelectorAll('.fbtn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  applyFilter();
+}
+
+function filterTable() {
+  searchVal = document.querySelector('.search').value.toLowerCase();
+  applyFilter();
+}
+
+function applyFilter() {
+  let visible = 0;
+  document.querySelectorAll('#tbody tr').forEach(row => {
+    const st = row.dataset.status || 'pending';
+    const name = row.dataset.name || '';
+    const phone = row.dataset.phone || '';
+    const matchFilter = filterMode === 'all'
+      || (filterMode === 'pending' && (st === 'pending' || st === 'sending'))
+      || filterMode === st;
+    const matchSearch = !searchVal || name.includes(searchVal) || phone.includes(searchVal);
+    const show = matchFilter && matchSearch;
+    row.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  document.getElementById('tcount').textContent = `${visible} de ${total} contatos`;
+}
+
+// ── WS Status check ───────────────────────────────────────────────────────────
+async function checkConn() {
+  try {
+    const r = await fetch('/api/instance/status').then(r=>r.json());
+    const st = r?.data?.instance?.state || r?.data?.state;
+    const dot = document.getElementById('connDot');
+    const txt = document.getElementById('connText');
+    if (st === 'open') {
+      dot.className = 'conn-dot on';
+      txt.textContent = 'WhatsApp conectado';
+    } else {
+      dot.className = 'conn-dot';
+      txt.textContent = st || 'Desconectado';
+    }
+  } catch(e) {
+    document.getElementById('connText').textContent = 'API offline';
+  }
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+async function init() {
+  const r = await fetch('/api/contacts').then(r=>r.json());
+  contacts = r;
+  total = contacts.length;
+  statuses = r.map(c => c.status || 'pending');
+  timestamps = r.map(c => c.timestamp || '');
+  errorMsgs = r.map(c => c.errorMsg || '');
+  connectWS();
+  checkConn();
+  setInterval(checkConn, 15000);
+  updateControls();
+}
+
+init();
+</script>
+</body>
+</html>
