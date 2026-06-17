@@ -180,6 +180,7 @@ input, textarea {
   transition: border-color .18s, box-shadow .18s;
 }
 input:focus, textarea:focus { border-color: var(--yellow2); box-shadow: 0 0 0 3px var(--yg); }
+input[readonly] { color: var(--t3); cursor: default; }
 textarea { resize: vertical; min-height: 88px; }
 
 .fg   { margin-bottom: 12px; }
@@ -261,6 +262,15 @@ textarea { resize: vertical; min-height: 88px; }
   background: var(--input-bg); border: 1px solid var(--border2); border-radius: 9px;
   padding: 12px; margin-bottom: 10px;
 }
+
+/* webhook url box */
+.wh-box {
+  background: var(--input-bg); border: 1px solid var(--border2); border-radius: 7px;
+  padding: 8px 11px; font-size: 11px; color: var(--blue);
+  font-family: 'Courier New', monospace; word-break: break-all;
+  cursor: pointer; transition: border-color .18s;
+}
+.wh-box:hover { border-color: var(--blue); }
 
 /* ═══ STAT CARDS ════════════════════════════════════════════ */
 .stats-grid {
@@ -452,7 +462,7 @@ td:first-child { text-align: center; font-size: 11px; color: var(--t4); font-var
 <header class="hdr">
   <div class="hdr-brand">
     <div class="hdr-logo" id="logoWrap">
-      <img id="logoImg" src="/assets/logo_000058725.jpg" alt=""
+      <img id="logoImg" src="logo_000058725.jpg" alt=""
         onload="cleanLogo(this)"
         onerror="this.parentElement.innerHTML='<span class=\'fb\'>✂</span>'">
     </div>
@@ -467,7 +477,7 @@ td:first-child { text-align: center; font-size: 11px; color: var(--t4); font-var
       <span id="l-wa">WhatsApp</span>
     </div>
     <div class="hdr-st">
-      <div class="dot d-err" id="d-ws"></div>
+      <div class="dot d-err" id="d-rt"></div>
       <span>Realtime</span>
     </div>
   </div>
@@ -557,12 +567,17 @@ td:first-child { text-align: center; font-size: 11px; color: var(--t4); font-var
           <div class="card">
             <div class="card-head" style="padding-bottom:14px"><div class="card-lbl">Evolution API</div></div>
             <div class="card-body" style="padding-top:0">
-              <div class="fg"><label>URL da API</label><input id="cUrl" placeholder="http://localhost:8080"></div>
+              <div class="fg"><label>URL da API</label><input id="cUrl" placeholder="http://meu-servidor:8080"></div>
               <div class="fg"><label>API Key</label><input id="cKey" type="password" placeholder="sua-api-key"></div>
               <div class="fg0"><label>Instância</label><input id="cInst" placeholder="fastescova"></div>
               <div class="sep"></div>
-              <div class="fg0"><label>URL Pública — Webhook</label><input id="cWh" placeholder="http://meu-servidor.com:3000"></div>
-              <div style="font-size:10.5px;color:var(--t3);margin-top:5px;margin-bottom:12px">Para rastrear leituras e respostas</div>
+              <div class="fg">
+                <label>URL do Webhook (automático)</label>
+                <div class="wh-box" id="whUrl" onclick="copyWh()" title="Clique para copiar">
+                  https://gkbjemvwutaiksuueiqt.supabase.co/functions/v1/fast-webhook
+                </div>
+                <div style="font-size:10px;color:var(--t3);margin-top:5px">Clique para copiar • Cole na Evolution API ou clique em Ativar</div>
+              </div>
               <div class="brow">
                 <button class="btn btn-y" onclick="saveCfg()">Salvar</button>
                 <button class="btn btn-g" onclick="setWh()">Ativar Webhook</button>
@@ -720,51 +735,50 @@ td:first-child { text-align: center; font-size: 11px; color: var(--t4); font-var
 // ── Supabase ────────────────────────────────────────────────
 const SUPA_URL  = 'https://gkbjemvwutaiksuueiqt.supabase.co';
 const SUPA_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdrYmplbXZ3dXRhaWtzdXVlaXF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxMDg2OTQsImV4cCI6MjA5NTY4NDY5NH0.wZS9W4aLr68KEpkxHhHTakjibzRNxGAqgckz3n9VovQ';
-const sb = supabase.createClient(SUPA_URL, SUPA_ANON);
+const EFN       = `${SUPA_URL}/functions/v1`;
+const sb        = supabase.createClient(SUPA_URL, SUPA_ANON);
 
 // ── State ──────────────────────────────────────────────────
 const S = {
-  contacts:[], statuses:[], timestamps:[], errorMsgs:[],
-  classifications:[], readTimes:[], replyTimes:[], replies:[],
+  contacts:[], statuses:[], timestamps:[], classifications:[],
+  readTimes:[], replies:[],
   sent:0, errors:0, skipped:0, hot:0, warm:0, cold:0,
-  total:0, running:false, paused:false, nextIn:0, filter:'all'
+  total:0, running:false, paused:false, filter:'all'
 };
-let waPoller=null, curPage='analise', countdownTimer=null, lastResetAt=null;
+let waPoller=null, curPage='analise', cdTimer=null, lastResetAt=null;
 
-// ── Logo: remove white bg via canvas ──────────────────────
+// ── Logo canvas cleanup ────────────────────────────────────
 function cleanLogo(img) {
   try {
-    const c = document.createElement('canvas');
-    c.width = img.naturalWidth; c.height = img.naturalHeight;
-    const ctx = c.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    const d = ctx.getImageData(0,0,c.width,c.height);
-    for (let i=0; i<d.data.length; i+=4) {
-      const r=d.data[i], g=d.data[i+1], b=d.data[i+2];
-      if (r>230 && g>230 && b>230) d.data[i+3]=0;
-      else if (r>200 && g>200 && b>200) d.data[i+3]=Math.round((255-((r+g+b)/3))*3.5);
+    const c=document.createElement('canvas');
+    c.width=img.naturalWidth; c.height=img.naturalHeight;
+    const ctx=c.getContext('2d'); ctx.drawImage(img,0,0);
+    const d=ctx.getImageData(0,0,c.width,c.height);
+    for(let i=0;i<d.data.length;i+=4){
+      const r=d.data[i],g=d.data[i+1],b=d.data[i+2];
+      if(r>230&&g>230&&b>230)d.data[i+3]=0;
+      else if(r>200&&g>200&&b>200)d.data[i+3]=Math.round((255-((r+g+b)/3))*3.5);
     }
-    ctx.putImageData(d,0,0);
-    img.src = c.toDataURL('image/png');
+    ctx.putImageData(d,0,0); img.src=c.toDataURL('image/png');
   } catch {}
 }
 
 // ── Nav ────────────────────────────────────────────────────
 function go(p) {
-  if (p===curPage) return;
+  if(p===curPage)return;
   const prev=curPage; curPage=p;
-  document.getElementById(`pg-${prev}`).className = `page ${p==='analise'?'go-left':'go-right'}`;
-  document.getElementById(`pg-${p}`).className = 'page';
+  document.getElementById(`pg-${prev}`).className=`page ${p==='analise'?'go-left':'go-right'}`;
+  document.getElementById(`pg-${p}`).className='page';
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById(`ni-${p}`).classList.add('active');
 }
 
 // ── Helpers ────────────────────────────────────────────────
-const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-const cut = (s,n) => { s=String(s||''); return s.length>n?s.slice(0,n)+'…':s; };
-const fmts = s => { if(!s||s<=0)return'—'; const m=Math.floor(s/60),r=s%60; return m?`${m}m ${String(r).padStart(2,'0')}s`:`${r}s`; };
+const esc = s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const cut = (s,n)=>{s=String(s||'');return s.length>n?s.slice(0,n)+'…':s;};
+const fmts = s=>{if(!s||s<=0)return'—';const m=Math.floor(s/60),r=s%60;return m?`${m}m ${String(r).padStart(2,'0')}s`:`${r}s`;};
 
-function toast(msg, cls='') {
+function toast(msg,cls=''){
   const el=document.createElement('div');
   el.className=`tst${cls?' '+cls:''}`;
   el.textContent=msg;
@@ -772,40 +786,39 @@ function toast(msg, cls='') {
   setTimeout(()=>el.remove(),3600);
 }
 
-function alert2(id, msg, t='err') {
+function alert2(id,msg,t='err'){
   const el=document.getElementById(id);
   if(!el)return;
   el.className=`alrt a-${t}`; el.textContent=msg; el.style.display='block';
-  if(t!=='err') setTimeout(()=>el.style.display='none',3500);
+  if(t!=='err')setTimeout(()=>el.style.display='none',3500);
 }
 
-function animN(el, to) {
+function animN(el,to){
   if(!el)return;
   const from=parseInt(el.textContent)||0; if(from===to)return;
-  const diff=to-from, steps=14;
-  let i=0;
-  const tick=()=>{ i++; el.textContent=Math.round(from+diff*(i/steps)); if(i<steps)requestAnimationFrame(tick); };
+  const diff=to-from,steps=14; let i=0;
+  const tick=()=>{i++;el.textContent=Math.round(from+diff*(i/steps));if(i<steps)requestAnimationFrame(tick);};
   requestAnimationFrame(tick);
 }
 
 // ── Badges ─────────────────────────────────────────────────
-const stBdg = s=>({
-  pending: '<span class="bdg b-pend">Pendente</span>',
-  sending: '<span class="bdg b-send">● Enviando</span>',
-  sent:    '<span class="bdg b-sent">✓ Enviado</span>',
-  error:   '<span class="bdg b-err">✗ Erro</span>',
-  skipped: '<span class="bdg b-skip">Inválido</span>'
+const stBdg=s=>({
+  pending:'<span class="bdg b-pend">Pendente</span>',
+  sending:'<span class="bdg b-send">● Enviando</span>',
+  sent:'<span class="bdg b-sent">✓ Enviado</span>',
+  error:'<span class="bdg b-err">✗ Erro</span>',
+  skipped:'<span class="bdg b-skip">Inválido</span>'
 }[s]||'<span class="bdg b-pend">Pendente</span>');
 
-const clBdg = c=>({
-  none:   '<span class="b-none">—</span>',
-  frio:   '<span class="bdg b-frio">❄ Frio</span>',
-  morno:  '<span class="bdg b-morno">🌡 Morno</span>',
-  quente: '<span class="bdg b-hot">🔥 Quente</span>'
+const clBdg=c=>({
+  none:'<span class="b-none">—</span>',
+  frio:'<span class="bdg b-frio">❄ Frio</span>',
+  morno:'<span class="bdg b-morno">🌡 Morno</span>',
+  quente:'<span class="bdg b-hot">🔥 Quente</span>'
 }[c]||'<span class="b-none">—</span>');
 
 // ── Table ──────────────────────────────────────────────────
-function buildTable(contacts) {
+function buildTable(contacts){
   const frag=document.createDocumentFragment();
   contacts.forEach((c,i)=>{
     const tr=document.createElement('tr');
@@ -822,7 +835,7 @@ function buildTable(contacts) {
   applyFilt();
 }
 
-function rowH(i,c) {
+function rowH(i,c){
   const r=c.reply?cut(c.reply,40):'—';
   return `<td>${i+1}</td>
     <td class="td-n" title="${esc(c.name)}">${esc(cut(c.name,22))}</td>
@@ -834,19 +847,17 @@ function rowH(i,c) {
     <td id="cb${i}">${clBdg(c.classification||'none')}</td>`;
 }
 
-function upRow(i, st, ts, cls) {
+function upRow(i,st,ts,cls){
   const tr=document.getElementById(`r${i}`); if(!tr)return;
   tr.dataset.status=st; if(cls)tr.dataset.cls=cls;
   tr.classList.toggle('r-on',st==='sending');
   const sb=document.getElementById(`sb${i}`); if(sb)sb.innerHTML=stBdg(st);
   const te=document.getElementById(`ts${i}`); if(te&&ts)te.textContent=ts;
   if(cls){const cb=document.getElementById(`cb${i}`);if(cb)cb.innerHTML=clBdg(cls);}
-  if(st==='sending'&&S.filter==='all'&&!document.getElementById('srch')?.value)
-    tr.scrollIntoView({block:'nearest',behavior:'smooth'});
   applyFilt();
 }
 
-function upCls(i, cls, rt, reply) {
+function upCls(i,cls,rt,reply){
   const tr=document.getElementById(`r${i}`); if(!tr)return;
   tr.dataset.cls=cls;
   const cb=document.getElementById(`cb${i}`); if(cb)cb.innerHTML=clBdg(cls);
@@ -859,59 +870,69 @@ function upCls(i, cls, rt, reply) {
 }
 
 // ── Filter ─────────────────────────────────────────────────
-function filt(f, btn) {
+function filt(f,btn){
   S.filter=f;
   document.querySelectorAll('.pill').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
   applyFilt();
 }
 
-function applyFilt() {
+function applyFilt(){
   const q=(document.getElementById('srch')?.value||'').toLowerCase();
   document.querySelectorAll('#tbody tr').forEach(tr=>{
-    const st=tr.dataset.status, cl=tr.dataset.cls;
-    let ok = S.filter==='all'     ? true
-           : S.filter==='sent'    ? (st==='sent'||st==='skipped')
-           : S.filter==='frio'    ? cl==='frio'
-           : S.filter==='morno'   ? cl==='morno'
-           : S.filter==='quente'  ? cl==='quente'
-           : S.filter==='error'   ? st==='error'
-           : st==='pending';
-    if(ok&&q) ok=tr.dataset.name.includes(q)||tr.dataset.phone.includes(q);
+    const st=tr.dataset.status,cl=tr.dataset.cls;
+    let ok=S.filter==='all'?true
+      :S.filter==='sent'?(st==='sent'||st==='skipped')
+      :S.filter==='frio'?cl==='frio'
+      :S.filter==='morno'?cl==='morno'
+      :S.filter==='quente'?cl==='quente'
+      :S.filter==='error'?st==='error'
+      :st==='pending';
+    if(ok&&q)ok=tr.dataset.name.includes(q)||tr.dataset.phone.includes(q);
     tr.classList.toggle('r-hide',!ok);
   });
 }
 
 // ── Stats ──────────────────────────────────────────────────
-function setTemp(cold, warm, hot, sent) {
-  animN(document.getElementById('tv-frio'),  cold);
-  animN(document.getElementById('tv-morno'), warm);
-  animN(document.getElementById('tv-hot'),   hot);
-  const base = sent > 0 ? sent : 1;
-  const pf = Math.round(cold/base*100), pm = Math.round(warm/base*100), ph = Math.round(hot/base*100);
-  document.getElementById('tb-frio').style.width  = pf+'%';
-  document.getElementById('tb-morno').style.width = pm+'%';
-  document.getElementById('tb-hot').style.width   = ph+'%';
-  document.getElementById('tp-frio').textContent  = `${pf}% dos enviados`;
-  document.getElementById('tp-morno').textContent = `${pm}% dos enviados`;
-  document.getElementById('tp-hot').textContent   = `${ph}% dos enviados`;
+function setTemp(cold,warm,hot,sent){
+  animN(document.getElementById('tv-frio'),cold);
+  animN(document.getElementById('tv-morno'),warm);
+  animN(document.getElementById('tv-hot'),hot);
+  const base=sent>0?sent:1;
+  const pf=Math.round(cold/base*100),pm=Math.round(warm/base*100),ph=Math.round(hot/base*100);
+  document.getElementById('tb-frio').style.width=pf+'%';
+  document.getElementById('tb-morno').style.width=pm+'%';
+  document.getElementById('tb-hot').style.width=ph+'%';
+  document.getElementById('tp-frio').textContent=`${pf}% dos enviados`;
+  document.getElementById('tp-morno').textContent=`${pm}% dos enviados`;
+  document.getElementById('tp-hot').textContent=`${ph}% dos enviados`;
 }
 
-function setStats(sent, err, skip, hot, warm, cold) {
+function setStats(sent,err,skip,hot,warm,cold){
   Object.assign(S,{sent,errors:err,skipped:skip,hot,warm,cold});
-  animN(document.getElementById('sv-sent'), sent);
-  animN(document.getElementById('sv-err'),  err);
-  setTemp(cold, warm, hot, sent);
-  const done=sent+err+skip, pct=S.total>0?Math.round(done/S.total*100):0;
+  animN(document.getElementById('sv-sent'),sent);
+  animN(document.getElementById('sv-err'),err);
+  setTemp(cold,warm,hot,sent);
+  const done=sent+err+skip,pct=S.total>0?Math.round(done/S.total*100):0;
   document.getElementById('progBar').style.width=pct+'%';
   document.getElementById('progTxt').textContent=`${done} / ${S.total}  ·  ${pct}%`;
 }
 
-function setCountdown(s) {
-  S.nextIn=s; document.getElementById('sv-next').textContent=fmts(s);
+function setCountdown(s){
+  document.getElementById('sv-next').textContent=fmts(s);
 }
 
-function setStBadge(st) {
+function startCountdown(nextAt){
+  clearInterval(cdTimer);
+  if(!nextAt){setCountdown(0);return;}
+  cdTimer=setInterval(()=>{
+    const sec=Math.max(0,Math.round((new Date(nextAt)-Date.now())/1000));
+    setCountdown(sec);
+    if(sec<=0)clearInterval(cdTimer);
+  },1000);
+}
+
+function setStBadge(st){
   const el=document.getElementById('stBadge');
   el.className='sbadge';
   if(st==='running'){el.classList.add('sb-running');el.textContent='● Disparando';}
@@ -920,136 +941,110 @@ function setStBadge(st) {
   else{el.classList.add('sb-idle');el.textContent='Aguardando';}
 }
 
-function setCtrl(running, paused) {
-  const bs=document.getElementById('btnStart'), bp=document.getElementById('btnPause');
+function setCtrl(running,paused){
+  const bs=document.getElementById('btnStart'),bp=document.getElementById('btnPause');
   if(running&&!paused){bs.textContent='▶ Disparando…';bs.disabled=true;bp.disabled=false;setStBadge('running');}
   else if(paused){bs.textContent='▶ Retomar';bs.disabled=false;bp.disabled=true;setStBadge('paused');}
   else{bs.textContent='▶ Iniciar';bs.disabled=false;bp.disabled=true;}
 }
 
 // ── Supabase Realtime ──────────────────────────────────────
-function startCountdown(nextAt) {
-  clearInterval(countdownTimer);
-  if (!nextAt) { setCountdown(0); return; }
-  countdownTimer = setInterval(() => {
-    const sec = Math.max(0, Math.round((new Date(nextAt) - Date.now()) / 1000));
-    setCountdown(sec);
-    if (sec <= 0) clearInterval(countdownTimer);
-  }, 1000);
+async function loadRunState(){
+  const {data}=await sb.from('fast_run_state').select('*').eq('id',1).single().catch(()=>({data:null}));
+  if(!data)return;
+  S.running=data.running||false; S.paused=data.paused||false;
+  lastResetAt=data.reset_at||null;
+  setStats(data.sent||0,data.errors||0,data.skipped||0,data.hot||0,data.warm||0,data.cold||0);
+  setCtrl(data.running,data.paused);
+  if(!data.running&&!data.paused&&(data.sent||0)>0)setStBadge('done');
+  startCountdown(data.next_message_at||null);
 }
 
-function mergeS() {
-  S.contacts.forEach((c,i) => {
-    c.status         = S.statuses[i]        || 'pending';
-    c.timestamp      = S.timestamps[i]      || '';
-    c.classification = S.classifications[i] || 'none';
-    c.readTime       = S.readTimes[i]       || '';
-    c.reply          = S.replies[i]         || '';
-  });
-}
-
-function handleReset() {
-  clearInterval(countdownTimer);
-  S.statuses        = new Array(S.total).fill('pending');
-  S.classifications = new Array(S.total).fill('none');
-  S.timestamps      = new Array(S.total).fill('');
-  S.errorMsgs       = new Array(S.total).fill('');
-  S.readTimes       = new Array(S.total).fill('');
-  S.replyTimes      = new Array(S.total).fill('');
-  S.replies         = new Array(S.total).fill('');
-  S.running = false; S.paused = false;
-  mergeS(); buildTable(S.contacts);
+function handleReset(){
+  clearInterval(cdTimer);
+  S.statuses=new Array(S.total).fill('pending');
+  S.classifications=new Array(S.total).fill('none');
+  S.timestamps=new Array(S.total).fill('');
+  S.readTimes=new Array(S.total).fill('');
+  S.replies=new Array(S.total).fill('');
+  S.running=false; S.paused=false;
+  S.contacts.forEach((c,i)=>{c.status='pending';c.timestamp='';c.classification='none';c.readTime='';c.reply='';});
+  buildTable(S.contacts);
   setStats(0,0,0,0,0,0); setCountdown(0); setCtrl(false,false); setStBadge('idle');
-  toast('↺ Disparo reiniciado');
+  toast('↺ Reiniciado');
 }
 
-async function loadRunState() {
-  const { data } = await sb.from('fast_run_state').select('*').eq('id',1).single().catch(()=>({data:null}));
-  if (!data) return;
-  S.running = data.running || false;
-  S.paused  = data.paused  || false;
-  lastResetAt = data.reset_at || null;
-  setStats(data.sent||0, data.errors||0, data.skipped||0, data.hot||0, data.warm||0, data.cold||0);
-  setCtrl(data.running, data.paused);
-  if (!data.running && !data.paused && (data.sent||0) > 0) setStBadge('done');
-  startCountdown(data.next_message_at || null);
-}
-
-function connectRealtime() {
-  const dot = () => document.getElementById('d-ws');
-
+function connectRealtime(){
+  const dot=()=>document.getElementById('d-rt');
   sb.channel('fast-live')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'fast_run_state' }, ({new: d}) => {
-      if (!d) return;
-
-      // Reset detection
-      if (d.reset_at && d.reset_at !== lastResetAt) {
-        lastResetAt = d.reset_at;
-        handleReset();
-        return;
-      }
-
-      S.running = d.running || false;
-      S.paused  = d.paused  || false;
-      setStats(d.sent||0, d.errors||0, d.skipped||0, d.hot||0, d.warm||0, d.cold||0);
-      setCtrl(d.running, d.paused);
-
-      const done = (d.sent||0) + (d.errors||0) + (d.skipped||0);
-      if (!d.running && !d.paused && done > 0 && (d.current_index||0) >= S.total) {
+    .on('postgres_changes',{event:'*',schema:'public',table:'fast_run_state'},({new:d})=>{
+      if(!d)return;
+      if(d.reset_at&&d.reset_at!==lastResetAt){lastResetAt=d.reset_at;handleReset();return;}
+      S.running=d.running||false; S.paused=d.paused||false;
+      setStats(d.sent||0,d.errors||0,d.skipped||0,d.hot||0,d.warm||0,d.cold||0);
+      setCtrl(d.running,d.paused);
+      const done=(d.sent||0)+(d.errors||0)+(d.skipped||0);
+      if(!d.running&&!d.paused&&done>0&&(d.current_index||0)>=S.total){
         setStBadge('done');
-        toast(`✓ Concluído — ${d.sent} enviados, ${d.errors} erros, ${d.skipped} inválidos`, 'tok');
+        toast(`✓ Concluído — ${d.sent} enviados, ${d.errors} erros, ${d.skipped} inválidos`,'tok');
       }
-
-      startCountdown(d.next_message_at || null);
+      startCountdown(d.next_message_at||null);
     })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'fast_dispatch' }, ({new: d}) => {
-      if (!d || d.idx == null) return;
-      const i = d.idx;
-      S.statuses[i]        = d.status        || 'pending';
-      S.timestamps[i]      = d.sent_at       || '';
-      S.classifications[i] = d.classification || 'none';
-      S.readTimes[i]       = d.read_time     || '';
-      S.replies[i]         = d.reply         || '';
-      upRow(i, d.status || 'pending', d.sent_at || '', d.classification || 'none');
-      if (d.classification && d.classification !== 'none') {
-        upCls(i, d.classification, d.read_time || '', d.reply || '');
-      }
+    .on('postgres_changes',{event:'*',schema:'public',table:'fast_dispatch'},({new:d})=>{
+      if(!d||d.idx==null)return;
+      const i=d.idx;
+      S.statuses[i]=d.status||'pending';
+      S.timestamps[i]=d.sent_at||'';
+      S.classifications[i]=d.classification||'none';
+      S.readTimes[i]=d.read_time||'';
+      S.replies[i]=d.reply||'';
+      upRow(i,d.status||'pending',d.sent_at||'',d.classification||'none');
+      if(d.classification&&d.classification!=='none')upCls(i,d.classification,d.read_time||'',d.reply||'');
     })
-    .subscribe(status => {
-      const ok = status === 'SUBSCRIBED';
-      dot().className = `dot ${ok ? 'd-ok' : status === 'CHANNEL_ERROR' ? 'd-err' : 'd-warn'}`;
+    .subscribe(status=>{
+      const ok=status==='SUBSCRIBED';
+      dot().className=`dot ${ok?'d-ok':status==='CHANNEL_ERROR'?'d-err':'d-warn'}`;
     });
 }
 
-// ── WhatsApp ───────────────────────────────────────────────
-async function checkWa() {
-  const r=await fetch('/api/instance/status').then(r=>r.json()).catch(()=>null);
-  const st=r?.data?.instance?.state||r?.data?.state||'';
-  const ok=st==='open';
-  document.getElementById('waRing').className=`wa-ring${ok?' on':''}`;
-  document.getElementById('waState').textContent=ok?'Conectado':st||'Desconectado';
-  document.getElementById('waSub').textContent=ok?'WhatsApp ativo':'Escaneie o QR ou insira o código';
-  document.getElementById('d-wa').className=`dot ${ok?'d-ok':'d-warn'}`;
-  document.getElementById('l-wa').textContent=ok?'Conectado':'Desconectado';
-  document.getElementById('qrTabs').style.display=ok?'none':'flex';
-  if(ok&&waPoller){clearInterval(waPoller);waPoller=null;}
+// ── WhatsApp (via fast-wa Edge Function) ───────────────────
+async function callWa(action,body={}){
+  const isPost=Object.keys(body).length>0;
+  return fetch(`${EFN}/fast-wa?action=${action}`,{
+    method:isPost?'POST':'GET',
+    headers:{'Content-Type':'application/json'},
+    body:isPost?JSON.stringify(body):undefined
+  }).then(r=>r.json()).catch(e=>({ok:false,error:e.message}));
 }
 
-async function createInst() {
-  const r=await fetch('/api/instance/create',{method:'POST'}).then(r=>r.json()).catch(()=>null);
+async function checkWa(){
+  const r=await callWa('status');
+  const st=r?.data?.instance?.state||r?.data?.state||'';
+  const online=st==='open';
+  document.getElementById('waRing').className=`wa-ring${online?' on':''}`;
+  document.getElementById('waState').textContent=online?'Conectado':st||'Desconectado';
+  document.getElementById('waSub').textContent=online?'WhatsApp ativo':'Escaneie o QR ou insira o código';
+  document.getElementById('d-wa').className=`dot ${online?'d-ok':'d-warn'}`;
+  document.getElementById('l-wa').textContent=online?'Conectado':'Desconectado';
+  document.getElementById('qrTabs').style.display=online?'none':'flex';
+  if(online&&waPoller){clearInterval(waPoller);waPoller=null;}
+}
+
+async function createInst(){
+  const r=await callWa('create');
   if(r?.ok){alert2('al-wa','Instância criada. Gere o QR Code.','ok');document.getElementById('qrTabs').style.display='flex';}
   else alert2('al-wa',r?.error||'Erro ao criar instância');
 }
 
-function switchTab(t) {
+function switchTab(t){
   document.querySelectorAll('.qr-tab').forEach((el,i)=>el.classList.toggle('active',(t==='qr'&&i===0)||(t==='pair'&&i===1)));
   document.getElementById('pane-qr').classList.toggle('active',t==='qr');
   document.getElementById('pane-pair').classList.toggle('active',t==='pair');
 }
 
-async function getQr() {
+async function getQr(){
   document.getElementById('qrFrame').innerHTML='<span class="qr-hint">Carregando…</span>';
-  const r=await fetch('/api/instance/qr').then(r=>r.json()).catch(()=>null);
+  const r=await callWa('qr');
   const b=r?.data?.base64||r?.data?.qrcode?.base64||r?.data?.qr?.base64||r?.data?.code;
   if(b){
     const src=b.startsWith('data:')?b:'data:image/png;base64,'+b;
@@ -1061,10 +1056,10 @@ async function getQr() {
   }
 }
 
-async function getPair() {
+async function getPair(){
   const ph=document.getElementById('pairPh').value.replace(/\D/g,'');
   if(!ph||ph.length<10){toast('Informe o número com DDD','terr');return;}
-  const r=await fetch('/api/instance/pairing-code',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phoneNumber:ph})}).then(r=>r.json()).catch(()=>null);
+  const r=await callWa('pairing',{phoneNumber:ph});
   const code=r?.data?.code||r?.data?.pairingCode||r?.code;
   if(code){
     document.getElementById('pairCode').textContent=code;
@@ -1074,84 +1069,131 @@ async function getPair() {
   } else toast(r?.error||'Erro ao gerar código','terr');
 }
 
-// ── Config ─────────────────────────────────────────────────
-async function loadCfg() {
-  const r=await fetch('/api/config').then(r=>r.json()).catch(()=>null);
-  if(!r)return;
-  document.getElementById('cUrl').value  = r.baseUrl||'';
-  document.getElementById('cKey').value  = r.apiKey?'***':'';
-  document.getElementById('cInst').value = r.instanceName||'';
-  document.getElementById('cWh').value   = r.webhookUrl||'';
+// ── Webhook URL copy ───────────────────────────────────────
+function copyWh(){
+  const url='https://gkbjemvwutaiksuueiqt.supabase.co/functions/v1/fast-webhook';
+  navigator.clipboard.writeText(url).then(()=>toast('URL copiada!','tok')).catch(()=>toast(url));
 }
 
-async function saveCfg() {
-  const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    baseUrl:document.getElementById('cUrl').value,
-    apiKey:document.getElementById('cKey').value,
-    instanceName:document.getElementById('cInst').value,
-    webhookUrl:document.getElementById('cWh').value
-  })}).then(r=>r.json()).catch(()=>null);
-  if(r?.ok){alert2('al-cfg','Configuração salva!','ok');checkWa();}
-  else alert2('al-cfg',r?.error||'Erro ao salvar');
+// ── Config (direto no Supabase) ────────────────────────────
+async function loadCfg(){
+  const {data:cfg}=await sb.from('fast_config').select('*').eq('id',1).single().catch(()=>({data:null}));
+  if(!cfg)return;
+  document.getElementById('cUrl').value  = cfg.base_url||'';
+  document.getElementById('cKey').value  = cfg.api_key?'***':'';
+  document.getElementById('cInst').value = cfg.instance_name||'';
+  document.getElementById('msgTxt').value= cfg.message||'Olá {nome}! Temos novidades incríveis na Fast Escova esperando por você! 💛✨';
+  document.getElementById('minD').value  = cfg.min_delay||1;
+  document.getElementById('maxD').value  = cfg.max_delay||3;
 }
 
-async function setWh() {
-  const wh=document.getElementById('cWh').value.trim();
-  if(!wh){alert2('al-cfg','Informe a URL pública do servidor');return;}
-  const r=await fetch('/api/webhook/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({webhookUrl:wh})}).then(r=>r.json()).catch(()=>null);
+async function saveCfg(){
+  const key=document.getElementById('cKey').value;
+  const upsert={
+    id:1,
+    base_url:document.getElementById('cUrl').value.trim(),
+    instance_name:document.getElementById('cInst').value.trim()||'fastescova',
+    updated_at:new Date().toISOString()
+  };
+  if(key&&key!=='***')upsert.api_key=key.trim();
+  const {error}=await sb.from('fast_config').upsert(upsert);
+  if(error)alert2('al-cfg',error.message);
+  else{alert2('al-cfg','Salvo!','ok');checkWa();}
+}
+
+async function setWh(){
+  const r=await callWa('webhook');
   if(r?.ok)alert2('al-cfg',`Webhook ativo: ${r.webhookUrl}`,'ok');
-  else alert2('al-cfg',r?.error||'Erro');
+  else alert2('al-cfg',r?.error||'Erro ao ativar webhook');
 }
 
-// ── Dispatch ───────────────────────────────────────────────
-async function doStart() {
-  const r=await fetch('/api/dispatch/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+async function saveSet(){
+  const {error}=await sb.from('fast_config').upsert({
+    id:1,
     message:document.getElementById('msgTxt').value,
-    minDelay:parseFloat(document.getElementById('minD').value)||1,
-    maxDelay:parseFloat(document.getElementById('maxD').value)||3
-  })}).then(r=>r.json()).catch(()=>null);
-  if(r?.ok){S.running=true;S.paused=false;setCtrl(true,false);}
-  else toast(r?.error||'Erro ao iniciar','terr');
+    min_delay:parseFloat(document.getElementById('minD').value)||1,
+    max_delay:parseFloat(document.getElementById('maxD').value)||3,
+    updated_at:new Date().toISOString()
+  });
+  if(error)alert2('al-msg','Erro ao salvar');
+  else alert2('al-msg','Salvo!','ok');
 }
 
-async function doPause() { await fetch('/api/dispatch/pause',{method:'POST'}); }
+// ── Dispatch (direto no Supabase) ──────────────────────────
+async function doStart(){
+  // Save message/delay first
+  await sb.from('fast_config').upsert({
+    id:1,
+    message:document.getElementById('msgTxt').value,
+    min_delay:parseFloat(document.getElementById('minD').value)||1,
+    max_delay:parseFloat(document.getElementById('maxD').value)||3
+  });
+  // Set running = true (pg_cron will pick this up within 1 minute)
+  const {error}=await sb.from('fast_run_state').upsert({
+    id:1, running:true, paused:false,
+    next_message_at:null, updated_at:new Date().toISOString()
+  });
+  if(!error){S.running=true;S.paused=false;setCtrl(true,false);toast('▶ Disparo iniciado — primeira mensagem em até 1 min','tok');}
+  else toast(error.message,'terr');
+}
 
-function doReset() {
+async function doPause(){
+  const isPaused=S.paused;
+  const {error}=await sb.from('fast_run_state').update({
+    paused:!isPaused, next_message_at:null, updated_at:new Date().toISOString()
+  }).eq('id',1);
+  if(!error)clearInterval(cdTimer);
+  else toast(error.message,'terr');
+}
+
+async function doReset(){
   if(!confirm('Reiniciar todos os envios?\nStatus e classificações serão apagados.'))return;
-  fetch('/api/dispatch/reset',{method:'POST'});
-}
-
-async function saveSet() {
-  const r=await fetch('/api/dispatch/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    message:document.getElementById('msgTxt').value,
-    minDelay:parseFloat(document.getElementById('minD').value)||1,
-    maxDelay:parseFloat(document.getElementById('maxD').value)||3
-  })}).then(r=>r.json()).catch(()=>null);
-  if(r?.ok)alert2('al-msg','Salvo!','ok');
-  else alert2('al-msg','Erro ao salvar');
+  clearInterval(cdTimer);
+  await sb.from('fast_dispatch').delete().neq('idx',-1);
+  const {error}=await sb.from('fast_run_state').upsert({
+    id:1, running:false, paused:false,
+    current_index:0, sent:0, errors:0, skipped:0,
+    hot:0, warm:0, cold:0,
+    next_message_at:null, reset_at:new Date().toISOString(),
+    updated_at:new Date().toISOString()
+  });
+  if(error)toast(error.message,'terr');
 }
 
 // ── Boot ───────────────────────────────────────────────────
 (async()=>{
-  const contacts = await fetch('/api/contacts').then(r=>r.json()).catch(()=>[]);
-  S.contacts = contacts; S.total = contacts.length;
-  document.getElementById('sv-tot').textContent = contacts.length;
-  document.getElementById('sub').textContent = `${contacts.length} contatos carregados`;
+  // Load contacts + dispatch state
+  const [{data:contacts},{data:dispatches}]=await Promise.all([
+    sb.from('fast_contacts').select('idx,name,phone').order('idx'),
+    sb.from('fast_dispatch').select('idx,status,sent_at,classification,read_time,reply')
+  ]);
 
-  // Seed local arrays from server response
-  contacts.forEach((c,i)=>{
-    S.statuses[i]        = c.status         || 'pending';
-    S.timestamps[i]      = c.timestamp      || '';
-    S.classifications[i] = c.classification || 'none';
-    S.readTimes[i]       = c.readTime       || '';
-    S.replies[i]         = c.reply          || '';
+  const dMap={};
+  (dispatches||[]).forEach(d=>dMap[d.idx]=d);
+
+  const list=(contacts||[]).map(c=>({
+    ...c,
+    status:     dMap[c.idx]?.status         ||'pending',
+    timestamp:  dMap[c.idx]?.sent_at        ||'',
+    classification: dMap[c.idx]?.classification ||'none',
+    readTime:   dMap[c.idx]?.read_time      ||'',
+    reply:      dMap[c.idx]?.reply          ||''
+  }));
+
+  S.contacts=list; S.total=list.length;
+  (list).forEach((c,i)=>{
+    S.statuses[i]=c.status; S.timestamps[i]=c.timestamp;
+    S.classifications[i]=c.classification; S.readTimes[i]=c.readTime;
+    S.replies[i]=c.reply;
   });
 
-  buildTable(contacts);
-  await loadCfg();
-  await loadRunState();
-  checkWa();
+  document.getElementById('sv-tot').textContent=list.length;
+  document.getElementById('sub').textContent=`${list.length} contatos carregados`;
+  buildTable(list);
+
+  await Promise.all([loadCfg(), loadRunState()]);
   connectRealtime();
+  checkWa();
 })();
 </script>
 </body>
