@@ -610,6 +610,26 @@ td:first-child { text-align: center; font-size: 11px; color: var(--t4); font-var
             </div>
           </div>
 
+          <!-- Teste de Envio -->
+          <div class="card">
+            <div class="card-head" style="padding-bottom:14px">
+              <div class="card-lbl">Teste de Envio</div>
+            </div>
+            <div class="card-body" style="padding-top:0">
+              <div style="font-size:11px;color:var(--t3);margin-bottom:12px;line-height:1.6">
+                Envia a mensagem configurada para um número seu — sem afetar contatos, contadores ou histórico de disparos.
+              </div>
+              <div class="frow">
+                <div><label>Seu número (com DDD)</label><input id="testPh" type="tel" placeholder="11999999999"></div>
+                <div><label>Nome (para {nome})</label><input id="testNm" type="text" placeholder="João"></div>
+              </div>
+              <button class="btn btn-y btn-full" id="btnTest" onclick="sendTest()">
+                ▶ Enviar mensagem de teste
+              </button>
+              <div id="al-test" class="alrt" style="margin-top:10px"></div>
+            </div>
+          </div>
+
         </div>
       </div>
     </div>
@@ -1214,6 +1234,30 @@ async function doReset(){
       next_message_at:null,reset_at:new Date().toISOString(),
       updated_at:new Date().toISOString()});
   }catch(e){toast('Erro ao reiniciar: '+e.message,'terr');}
+}
+
+// ── Teste de Envio ─────────────────────────────────────────
+async function sendTest(){
+  const phone=document.getElementById('testPh').value.trim();
+  const name =document.getElementById('testNm').value.trim()||'Teste';
+  if(!phone||phone.replace(/\D/g,'').length<8){
+    alert2('al-test','Informe um número com DDD válido (ex: 11999999999)');return;
+  }
+  const btn=document.getElementById('btnTest');
+  btn.disabled=true; btn.textContent='Enviando…';
+  alert2('al-test','','ok'); document.getElementById('al-test').style.display='none';
+  try{
+    const r=await callWa('test',{phone,name});
+    if(r?.ok){
+      alert2('al-test',`✓ Mensagem enviada para ${phone}! Verifique o WhatsApp.`,'ok');
+    } else {
+      alert2('al-test',`✗ Falhou: ${r?.error||'Erro desconhecido'}`);
+    }
+  }catch(e){
+    alert2('al-test','✗ Erro: '+e.message);
+  }finally{
+    btn.disabled=false; btn.textContent='▶ Enviar mensagem de teste';
+  }
 }
 
 // ── Boot ───────────────────────────────────────────────────
